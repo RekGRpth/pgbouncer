@@ -175,17 +175,18 @@ fail:
 
 static bool finish_set_pool(PgSocket *client, bool takeover)
 {
-	PgUser *user = client->login_user;
 	bool ok = false;
 	int auth;
 
-	/* pool user may be forced */
-	if (client->db->forced_user) {
-		user = client->db->forced_user;
-	}
+	if (!client->login_user->mock_auth) {
+		PgUser *pool_user;
 
-	if (!user->mock_auth) {
-		client->pool = get_pool(client->db, user);
+		if (client->db->forced_user)
+			pool_user = client->db->forced_user;
+		else
+			pool_user = client->login_user;
+
+		client->pool = get_pool(client->db, pool_user);
 		if (!client->pool) {
 			disconnect_client(client, true, "no memory for pool");
 			return false;
@@ -240,7 +241,8 @@ static bool finish_set_pool(PgSocket *client, bool takeover)
 	case AUTH_TRUST:
 		if (client->login_user->mock_auth)
 			disconnect_client(client, true, "\"trust\" authentication failed");
-		ok = finish_client_login(client);
+		else
+			ok = finish_client_login(client);
 		break;
 	case AUTH_PLAIN:
 	case AUTH_MD5:
@@ -341,9 +343,8 @@ bool set_pool(PgSocket *client, const char *dbname, const char *username, const 
 			 */
 			if (!client->db->auth_user && cf_auth_user) {
 				client->db->auth_user = find_user(cf_auth_user);
-				/* global auth_user should have been defined in auth_file */
 				if (!client->db->auth_user)
-					log_error("auth_user \"%s\" does not exist", cf_auth_user);
+					client->db->auth_user = add_user(cf_auth_user, "");
 			}
 			if (client->db->auth_user) {
 				if (takeover) {
