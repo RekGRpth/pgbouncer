@@ -151,10 +151,10 @@ $(w32zip): pgbouncer.exe pgbevent.dll etc/pgbouncer.ini etc/userlist.txt README.
 tags:
 	ctags src/*.c include/*.h lib/usual/*.[ch] lib/usual/*/*.[ch]
 
-htmls:
-	for f in *.md doc/*.md; do \
-		mkdir -p html && $(PANDOC) $$f -o html/`basename $$f`.html; \
-	done
+#htmls:
+#	for f in *.md doc/*.md; do \
+#		mkdir -p html && $(PANDOC) $$f -o html/`basename $$f`.html; \
+#	done
 
-doc/pgbouncer.1 doc/pgbouncer.5:
-	$(MAKE) -C doc
+#doc/pgbouncer.1 doc/pgbouncer.5:
+#	$(MAKE) -C doc
