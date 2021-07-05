@@ -9,7 +9,8 @@ export PGDATA=$PWD/pgdata
 export PGHOST=127.0.0.1
 export PGPORT=6667
 export EF_ALLOW_MALLOC_0=1
-export LANG=C
+export LC_ALL=C
+export POSIXLY_CORRECT=1
 
 BOUNCER_LOG=test.log
 BOUNCER_INI=test.ini

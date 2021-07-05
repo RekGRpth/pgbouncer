@@ -15,6 +15,8 @@ export PGDATA=$PWD/pgdata
 export PGHOST=localhost
 export PGPORT=6667
 export EF_ALLOW_MALLOC_0=1
+export LC_ALL=C
+export POSIXLY_CORRECT=1
 
 mkdir -p tmp
 
