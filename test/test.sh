@@ -83,10 +83,14 @@ if ! $use_unix_sockets; then
 	echo 'admin_users = pgbouncer' >> test.ini
 fi
 
+MAX_PASSWORD=$(sed -n $SED_ERE_OP 's/#define MAX_PASSWORD[[:space:]]+([0-9]+)/\1/p' ../include/bouncer.h)
+long_password=$(printf '%*s' $(($MAX_PASSWORD - 1)) | tr ' ' 'a')
+
 # System configuration checks
 if ! grep -q "^\"${USER:=$(id -un)}\"" userlist.txt; then
 	cp userlist.txt userlist.txt.bak
 	echo "\"${USER}\" \"01234\"" >> userlist.txt
+	echo "\"longpass\" \"${long_password}\"" >> userlist.txt
 fi
 
 if test -n "$USE_SUDO"; then
@@ -171,6 +175,7 @@ psql -X -p $PG_PORT -d p0 -c "select * from pg_user" | grep pswcheck > /dev/null
 	psql -X -o /dev/null -p $PG_PORT -c "create user pswcheck with superuser createdb password 'pgbouncer-check';" p0 || exit 1
 	psql -X -o /dev/null -p $PG_PORT -c "create user someuser with password 'anypasswd';" p0 || exit 1
 	psql -X -o /dev/null -p $PG_PORT -c "create user maxedout;" p0 || exit 1
+	psql -X -o /dev/null -p $PG_PORT -c "create user longpass with password '$long_password';" p0 || exit 1
 	if $pg_supports_scram; then
 		psql -X -o /dev/null -p $PG_PORT -c "set password_encryption = 'md5'; create user muser1 password 'foo';" p0 || exit 1
 		psql -X -o /dev/null -p $PG_PORT -c "set password_encryption = 'md5'; create user muser2 password 'wrong';" p0 || exit 1
@@ -557,6 +562,35 @@ test_pool_size() {
 	return 0
 }
 
+test_min_pool_size() {
+	# make existing connections go away
+	psql -X -p $PG_PORT -d postgres -c "select pg_terminate_backend(pid) from pg_stat_activity where usename='bouncer'"
+	until test $(psql -X -p $PG_PORT -d postgres -tAq -c "select count(1) from pg_stat_activity where usename='bouncer'") -eq 0; do sleep 0.1; done
+
+	# default_pool_size=5
+	admin "set min_pool_size = 3"
+
+	cnt=`psql -X -p $PG_PORT -tAq -c "select count(1) from pg_stat_activity where usename='bouncer' and datname='p1'" postgres`
+	echo $cnt
+	test "$cnt" -eq 0 || return 1
+
+	# It's a bit tricky to get the timing of this test to work
+	# robustly: Full maintenance runs three times a second, so we
+	# need to wait at least 1/3 seconds for it to notice for sure
+	# that the pool is in use.  When it does, it will launch one
+	# connection per round, so we need to wait at least 3 * 1/3
+	# second before all the min pool connections are launched.
+	# Also, we need to keep the query running while this is
+	# happening so that the pool doesn't become momentarily
+	# unused.
+	psql -X -c "select pg_sleep(2)" p1 &
+	sleep 2
+
+	cnt=`psql -X -p $PG_PORT -tAq -c "select count(1) from pg_stat_activity where usename='bouncer' and datname='p1'" postgres`
+	echo $cnt
+	test "$cnt" -eq 3 || return 1
+}
+
 test_max_db_connections() {
 	local users
 
@@ -832,6 +866,9 @@ test_password_server() {
 	# bad password from auth_file
 	psql -X -c "select 1" p4z && return 1
 
+	# long password from auth_file
+	psql -X -c "select 1" p4l || return 1
+
 	return 0
 }
 
@@ -847,6 +884,10 @@ test_password_client() {
 	PGPASSWORD=foo psql -X -U puser1 -c "select 1" p1 || return 1
 	# bad password
 	PGPASSWORD=wrong psql -X -U puser2 -c "select 2" p1 && return 1
+	# long password
+	PGPASSWORD=$long_password psql -X -U longpass -c "select 3" p1 || return 1
+	# too long password
+	PGPASSWORD=X$long_password psql -X -U longpass -c "select 4" p1 && return 1
 
 	# test with users that have an md5 password stored
 
@@ -1232,6 +1273,7 @@ test_server_check_delay
 test_tcp_user_timeout
 test_max_client_conn
 test_pool_size
+test_min_pool_size
 test_max_db_connections
 test_max_user_connections
 test_online_restart
