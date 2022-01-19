@@ -166,14 +166,14 @@ read_any_attr(PgSocket *sk, char **input, char *attr_p)
 }
 
 /*
- * Parse and validate format of given SCRAM verifier.
+ * Parse and validate format of given SCRAM secret.
  *
- * Returns true if the SCRAM verifier has been parsed, and false otherwise.
+ * Returns true if the SCRAM secret has been parsed, and false otherwise.
  */
-static bool parse_scram_verifier(const char *verifier, int *iterations, char **salt,
+static bool parse_scram_secret(const char *secret, int *iterations, char **salt,
 				 uint8_t *stored_key, uint8_t *server_key)
 {
-	char	   *v;
+	char	   *s;
 	char	   *p;
 	char	   *scheme_str;
 	char	   *salt_str;
@@ -186,75 +186,78 @@ static bool parse_scram_verifier(const char *verifier, int *iterations, char **s
 	char	   *decoded_server_buf = NULL;
 
 	/*
-	 * The verifier is of form:
+	 * The secret is of form:
 	 *
 	 * SCRAM-SHA-256$<iterations>:<salt>$<storedkey>:<serverkey>
 	 */
-	v = strdup(verifier);
-	if (!v)
-		goto invalid_verifier;
-	if ((scheme_str = strtok(v, "$")) == NULL)
-		goto invalid_verifier;
+	s = strdup(secret);
+	if (!s)
+		goto invalid_secret;
+	if ((scheme_str = strtok(s, "$")) == NULL)
+		goto invalid_secret;
 	if ((iterations_str = strtok(NULL, ":")) == NULL)
-		goto invalid_verifier;
+		goto invalid_secret;
 	if ((salt_str = strtok(NULL, "$")) == NULL)
-		goto invalid_verifier;
+		goto invalid_secret;
 	if ((storedkey_str = strtok(NULL, ":")) == NULL)
-		goto invalid_verifier;
+		goto invalid_secret;
 	if ((serverkey_str = strtok(NULL, "")) == NULL)
-		goto invalid_verifier;
+		goto invalid_secret;
 
 	/* Parse the fields */
 	if (strcmp(scheme_str, "SCRAM-SHA-256") != 0)
-		goto invalid_verifier;
+		goto invalid_secret;
 
 	errno = 0;
 	*iterations = strtol(iterations_str, &p, 10);
 	if (*p || errno != 0)
-		goto invalid_verifier;
+		goto invalid_secret;
 
 	/*
 	 * Verify that the salt is in Base64-encoded format, by decoding it,
 	 * although we return the encoded version to the caller.
 	 */
-	decoded_salt_buf = malloc(pg_b64_dec_len(strlen(salt_str)));
+	decoded_len = pg_b64_dec_len(strlen(salt_str));
+	decoded_salt_buf = malloc(decoded_len);
 	if (!decoded_salt_buf)
-		goto invalid_verifier;
-	decoded_len = pg_b64_decode(salt_str, strlen(salt_str), decoded_salt_buf);
+		goto invalid_secret;
+	decoded_len = pg_b64_decode(salt_str, strlen(salt_str), decoded_salt_buf, decoded_len);
 	free(decoded_salt_buf);
 	if (decoded_len < 0)
-		goto invalid_verifier;
+		goto invalid_secret;
 	*salt = strdup(salt_str);
 	if (!*salt)
-		goto invalid_verifier;
+		goto invalid_secret;
 
 	/*
 	 * Decode StoredKey and ServerKey.
 	 */
-	decoded_stored_buf = malloc(pg_b64_dec_len(strlen(storedkey_str)));
+	decoded_len = pg_b64_dec_len(strlen(storedkey_str));
+	decoded_stored_buf = malloc(decoded_len);
 	if (!decoded_stored_buf)
-		goto invalid_verifier;
-	decoded_len = pg_b64_decode(storedkey_str, strlen(storedkey_str), decoded_stored_buf);
+		goto invalid_secret;
+	decoded_len = pg_b64_decode(storedkey_str, strlen(storedkey_str), decoded_stored_buf, decoded_len);
 	if (decoded_len != SCRAM_KEY_LEN)
-		goto invalid_verifier;
+		goto invalid_secret;
 	memcpy(stored_key, decoded_stored_buf, SCRAM_KEY_LEN);
 
-	decoded_server_buf = malloc(pg_b64_dec_len(strlen(serverkey_str)));
+	decoded_len = pg_b64_dec_len(strlen(serverkey_str));
+	decoded_server_buf = malloc(decoded_len);
 	decoded_len = pg_b64_decode(serverkey_str, strlen(serverkey_str),
-				    decoded_server_buf);
+				    decoded_server_buf, decoded_len);
 	if (decoded_len != SCRAM_KEY_LEN)
-		goto invalid_verifier;
+		goto invalid_secret;
 	memcpy(server_key, decoded_server_buf, SCRAM_KEY_LEN);
 
 	free(decoded_stored_buf);
 	free(decoded_server_buf);
-	free(v);
+	free(s);
 	return true;
 
-invalid_verifier:
+invalid_secret:
 	free(decoded_stored_buf);
 	free(decoded_server_buf);
-	free(v);
+	free(s);
 	free(*salt);
 	*salt = NULL;
 	return false;
@@ -263,7 +266,7 @@ invalid_verifier:
 #define MD5_PASSWD_CHARSET "0123456789abcdef"
 
 /*
- * What kind of a password verifier is 'shadow_pass'?
+ * What kind of a password type is 'shadow_pass'?
  */
 PasswordType
 get_password_type(const char *shadow_pass)
@@ -277,7 +280,7 @@ get_password_type(const char *shadow_pass)
 	    strlen(shadow_pass) == MD5_PASSWD_LEN &&
 	    strspn(shadow_pass + 3, MD5_PASSWD_CHARSET) == MD5_PASSWD_LEN - 3)
 		return PASSWORD_TYPE_MD5;
-	if (parse_scram_verifier(shadow_pass, &iterations, &encoded_salt,
+	if (parse_scram_secret(shadow_pass, &iterations, &encoded_salt,
 				 stored_key, server_key)) {
 		free(encoded_salt);
 		return PASSWORD_TYPE_SCRAM_SHA_256;
@@ -299,10 +302,13 @@ char *build_client_first_message(ScramState *scram_state)
 
 	get_random_bytes(raw_nonce, SCRAM_RAW_NONCE_LEN);
 
-	scram_state->client_nonce = malloc(pg_b64_enc_len(SCRAM_RAW_NONCE_LEN) + 1);
+	encoded_len = pg_b64_enc_len(SCRAM_RAW_NONCE_LEN);
+	scram_state->client_nonce = malloc(encoded_len + 1);
 	if (scram_state->client_nonce == NULL)
 		goto failed;
-	encoded_len = pg_b64_encode((char *) raw_nonce, SCRAM_RAW_NONCE_LEN, scram_state->client_nonce);
+	encoded_len = pg_b64_encode((char *) raw_nonce, SCRAM_RAW_NONCE_LEN, scram_state->client_nonce, encoded_len);
+	if (encoded_len < 0)
+		goto failed;
 	scram_state->client_nonce[encoded_len] = '\0';
 
 	len = 8 + strlen(scram_state->client_nonce) + 1;
@@ -334,6 +340,7 @@ char *build_client_final_message(ScramState *scram_state,
 	char buf[512];
 	size_t len;
 	uint8_t	client_proof[SCRAM_KEY_LEN];
+	int enclen;
 
 	snprintf(buf, sizeof(buf), "c=biws,r=%s", server_nonce);
 
@@ -347,9 +354,13 @@ char *build_client_final_message(ScramState *scram_state,
 		goto failed;
 
 	len = strlcat(buf, ",p=", sizeof(buf));
-	len += pg_b64_encode((char *) client_proof,
+	enclen = pg_b64_enc_len(sizeof(client_proof));
+	enclen = pg_b64_encode((char *) client_proof,
 			     SCRAM_KEY_LEN,
-			     buf + len);
+			     buf + len, enclen);
+	if (enclen < 0)
+		goto failed;
+	len += enclen;
 	buf[len] = '\0';
 
 	return strdup(buf);
@@ -386,12 +397,13 @@ bool read_server_first_message(PgSocket *server, char *input,
 	encoded_salt = read_attr_value(server, &input, 's');
 	if (encoded_salt == NULL)
 		goto failed;
-	salt = malloc(pg_b64_dec_len(strlen(encoded_salt)));
+	saltlen = pg_b64_dec_len(strlen(encoded_salt));
+	salt = malloc(saltlen);
 	if (salt == NULL)
 		goto failed;
 	saltlen = pg_b64_decode(encoded_salt,
 				strlen(encoded_salt),
-				salt);
+				salt, saltlen);
 	if (saltlen < 0)
 	{
 		slog_error(server, "malformed SCRAM message (invalid salt)");
@@ -453,7 +465,8 @@ bool read_server_final_message(PgSocket *server, char *input, char *ServerSignat
 
 	server_signature_len = pg_b64_decode(encoded_server_signature,
 					     strlen(encoded_server_signature),
-					     decoded_server_signature);
+					     decoded_server_signature,
+					     server_signature_len);
 	if (server_signature_len != SCRAM_KEY_LEN)
 	{
 		slog_error(server, "malformed SCRAM message (malformed server signature)");
@@ -707,15 +720,19 @@ bool read_client_final_message(PgSocket *client, const uint8_t *raw_input, char 
 
 	encoded_proof = value;
 
-	proof = malloc(pg_b64_dec_len(strlen(encoded_proof)));
+	prooflen = pg_b64_dec_len(strlen(encoded_proof));
+	proof = malloc(prooflen);
 	if (proof == NULL) {
 		slog_error(client, "could not decode proof");
 		goto failed;
 	}
 	prooflen = pg_b64_decode(encoded_proof,
 				 strlen(encoded_proof),
-				 proof);
-	(void) prooflen;
+				 proof, prooflen);
+	if (prooflen != SCRAM_KEY_LEN) {
+		slog_error(client, "malformed SCRAM message (malformed proof in client-final-message)");
+		goto failed;
+	}
 
 	if (*input != '\0') {
 		slog_error(client, "malformed SCRAM message (garbage at the end of client-final-message)");
@@ -763,10 +780,13 @@ static bool build_adhoc_scram_secret(const char *plain_password, ScramState *scr
 
 	scram_state->iterations = SCRAM_DEFAULT_ITERATIONS;
 
-	scram_state->salt = malloc(pg_b64_enc_len(sizeof(saltbuf)) + 1);
+	encoded_len = pg_b64_enc_len(sizeof(saltbuf));
+	scram_state->salt = malloc(encoded_len + 1);
 	if (!scram_state->salt)
 		goto failed;
-	encoded_len = pg_b64_encode(saltbuf, sizeof(saltbuf), scram_state->salt);
+	encoded_len = pg_b64_encode(saltbuf, sizeof(saltbuf), scram_state->salt, encoded_len);
+	if (encoded_len < 0)
+		goto failed;
 	scram_state->salt[encoded_len] = '\0';
 
 	/* Calculate StoredKey and ServerKey */
@@ -825,10 +845,13 @@ static bool build_mock_scram_secret(const char *username, ScramState *scram_stat
 	scram_state->iterations = SCRAM_DEFAULT_ITERATIONS;
 
 	scram_mock_salt(username, saltbuf);
-	scram_state->salt = malloc(pg_b64_enc_len(sizeof(saltbuf)) + 1);
+	encoded_len = pg_b64_enc_len(sizeof(saltbuf));
+	scram_state->salt = malloc(encoded_len + 1);
 	if (!scram_state->salt)
 		goto failed;
-	encoded_len = pg_b64_encode((char *) saltbuf, sizeof(saltbuf), scram_state->salt);
+	encoded_len = pg_b64_encode((char *) saltbuf, sizeof(saltbuf), scram_state->salt, encoded_len);
+	if (encoded_len < 0)
+		goto failed;
 	scram_state->salt[encoded_len] = '\0';
 
 	return true;
@@ -849,7 +872,7 @@ char *build_server_first_message(ScramState *scram_state, const char *username, 
 	} else {
 		switch (get_password_type(stored_secret)) {
 		case PASSWORD_TYPE_SCRAM_SHA_256:
-			if (!parse_scram_verifier(stored_secret,
+			if (!parse_scram_secret(stored_secret,
 						  &scram_state->iterations,
 						  &scram_state->salt,
 						  scram_state->StoredKey,
@@ -867,10 +890,13 @@ char *build_server_first_message(ScramState *scram_state, const char *username, 
 	}
 
 	get_random_bytes(raw_nonce, SCRAM_RAW_NONCE_LEN);
-	scram_state->server_nonce = malloc(pg_b64_enc_len(SCRAM_RAW_NONCE_LEN) + 1);
+	encoded_len = pg_b64_enc_len(SCRAM_RAW_NONCE_LEN);
+	scram_state->server_nonce = malloc(encoded_len + 1);
 	if (scram_state->server_nonce == NULL)
 		goto failed;
-	encoded_len = pg_b64_encode((char *) raw_nonce, SCRAM_RAW_NONCE_LEN, scram_state->server_nonce);
+	encoded_len = pg_b64_encode((char *) raw_nonce, SCRAM_RAW_NONCE_LEN, scram_state->server_nonce, encoded_len);
+	if (encoded_len < 0)
+		goto failed;
 	scram_state->server_nonce[encoded_len] = '\0';
 
 	len = (2
@@ -921,11 +947,14 @@ compute_server_signature(ScramState *state)
 			  strlen(state->client_final_message_without_proof));
 	scram_HMAC_final(ServerSignature, &ctx);
 
-	server_signature_base64 = malloc(pg_b64_enc_len(SCRAM_KEY_LEN) + 1);
+	siglen = pg_b64_enc_len(SCRAM_KEY_LEN);
+	server_signature_base64 = malloc(siglen + 1);
 	if (!server_signature_base64)
 		return NULL;
 	siglen = pg_b64_encode((const char *) ServerSignature,
-						   SCRAM_KEY_LEN, server_signature_base64);
+			       SCRAM_KEY_LEN, server_signature_base64, siglen);
+	if (siglen < 0)
+		return NULL;
 	server_signature_base64[siglen] = '\0';
 
 	return server_signature_base64;
@@ -1006,14 +1035,14 @@ bool verify_client_proof(ScramState *state, const char *ClientProof)
 }
 
 /*
- * Verify a plaintext password against a SCRAM verifier.  This is used when
+ * Verify a plaintext password against a SCRAM secret.  This is used when
  * performing plaintext password authentication for a user that has a SCRAM
- * verifier stored in pg_authid.
+ * secret stored in pg_authid.
  */
 bool
 scram_verify_plain_password(PgSocket *client,
 			    const char *username, const char *password,
-			    const char *verifier)
+			    const char *secret)
 {
 	char *encoded_salt = NULL;
 	char *salt = NULL;
@@ -1027,21 +1056,22 @@ scram_verify_plain_password(PgSocket *client,
 	pg_saslprep_rc rc;
 	bool result = false;
 
-	if (!parse_scram_verifier(verifier, &iterations, &encoded_salt,
+	if (!parse_scram_secret(secret, &iterations, &encoded_salt,
 				  stored_key, server_key))
 	{
-		/* The password looked like a SCRAM verifier, but could not be parsed. */
-		slog_warning(client, "invalid SCRAM verifier for user \"%s\"", username);
+		/* The password looked like a SCRAM secret, but could not be parsed. */
+		slog_warning(client, "invalid SCRAM secret for user \"%s\"", username);
 		goto failed;
 	}
 
-	salt = malloc(pg_b64_dec_len(strlen(encoded_salt)));
+	saltlen = pg_b64_dec_len(strlen(encoded_salt));
+	salt = malloc(saltlen);
 	if (!salt)
 		goto failed;
-	saltlen = pg_b64_decode(encoded_salt, strlen(encoded_salt), salt);
-	if (saltlen == -1)
+	saltlen = pg_b64_decode(encoded_salt, strlen(encoded_salt), salt, saltlen);
+	if (saltlen < 0)
 	{
-		slog_warning(client, "invalid SCRAM verifier for user \"%s\"", username);
+		slog_warning(client, "invalid SCRAM secret for user \"%s\"", username);
 		goto failed;
 	}
 
@@ -1055,7 +1085,7 @@ scram_verify_plain_password(PgSocket *client,
 	scram_ServerKey(salted_password, computed_key);
 
 	/*
-	 * Compare the verifier's Server Key with the one computed from the
+	 * Compare the secret's Server Key with the one computed from the
 	 * user-supplied password.
 	 */
 	result = memcmp(computed_key, server_key, SCRAM_KEY_LEN) == 0;
