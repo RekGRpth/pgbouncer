@@ -255,8 +255,8 @@ static void tune_accept(int sock, bool on)
 #ifdef TCP_DEFER_ACCEPT
 	int val = 45; /* FIXME: proper value */
 	socklen_t vlen = sizeof(val);
-	res = getsockopt(sock, IPPROTO_TCP, TCP_DEFER_ACCEPT, &val, &vlen);
-	log_noise("old TCP_DEFER_ACCEPT on %d = %d", sock, val);
+	if (getsockopt(sock, IPPROTO_TCP, TCP_DEFER_ACCEPT, &val, &vlen) == 0)
+		log_noise("old TCP_DEFER_ACCEPT on %d = %d", sock, val);
 	val = on ? 1 : 0;
 	log_noise("%s TCP_DEFER_ACCEPT on %d", act, sock);
 	res = setsockopt(sock, IPPROTO_TCP, TCP_DEFER_ACCEPT, &val, sizeof(val));
@@ -458,7 +458,6 @@ static bool parse_addr(void *arg, const char *addr)
 	int res;
 	char service[64];
 	struct addrinfo *ai, *gaires = NULL;
-	bool ok;
 
 	if (!*addr)
 		return true;
@@ -473,10 +472,15 @@ static bool parse_addr(void *arg, const char *addr)
 	}
 
 	for (ai = gaires; ai; ai = ai->ai_next) {
-		ok = add_listen(ai->ai_family, ai->ai_addr, ai->ai_addrlen);
-		/* it's unclear whether all or only first result should be used */
-		if (0 && ok)
-			break;
+		/*
+		 * add_listen() will log a warning if there is a
+		 * problem.  We don't use the return value to fail the
+		 * whole thing, because that might lead to problems in
+		 * practice with overlapping host names or address
+		 * families and other weird stuff.  Users will know
+		 * soon enough if they can't connect.
+		 */
+		add_listen(ai->ai_family, ai->ai_addr, ai->ai_addrlen);
 	}
 
 	freeaddrinfo(gaires);
