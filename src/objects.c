@@ -718,7 +718,7 @@ static bool reset_on_release(PgSocket *server)
 	return res;
 }
 
-static bool life_over(PgSocket *server)
+bool life_over(PgSocket *server)
 {
 	PgPool *pool = server->pool;
 	usec_t lifetime_kill_gap = 0;
@@ -729,6 +729,11 @@ static bool life_over(PgSocket *server)
 	if (age < cf_server_lifetime)
 		return false;
 
+	/*
+	 * Calculate the time that disconnects because of server_lifetime
+	 * must be separated.  This avoids the need to re-launch lot
+	 * of connections together.
+	 */
 	if (pool_pool_size(pool) > 0)
 		lifetime_kill_gap = cf_server_lifetime / pool_pool_size(pool);
 
@@ -778,7 +783,7 @@ bool release_server(PgSocket *server)
 
 	/* enforce lifetime immediately on release */
 	if (server->state != SV_LOGIN && life_over(server)) {
-		disconnect_server(server, true, "server_lifetime");
+		disconnect_server(server, true, "server lifetime over");
 		pool->last_lifetime_disconnect = get_cached_time();
 		return false;
 	}
@@ -954,6 +959,10 @@ void disconnect_client(PgSocket *client, bool notify, const char *reason, ...)
 	if (client->login_user && client->login_user->mock_auth) {
 		free(client->login_user);
 		client->login_user = NULL;
+	}
+	if (client->db && client->db->fake) {
+		free(client->db);
+		client->db = NULL;
 	}
 
 	change_client_state(client, CL_JUSTFREE);
@@ -1289,6 +1298,18 @@ PgSocket *accept_client(int sock, bool is_unix)
 /* client managed to authenticate, send welcome msg and accept queries */
 bool finish_client_login(PgSocket *client)
 {
+	if (client->db->fake) {
+		if (cf_log_connections)
+			slog_info(client, "login failed: db=%s user=%s", client->db->name, client->login_user->name);
+		disconnect_client(client, true, "no such database: %s", client->db->name);
+		return false;
+	}
+
+	if (client->db->db_disabled) {
+		disconnect_client(client, true, "database \"%s\" is disabled", client->db->name);
+		return false;
+	}
+
 	switch (client->state) {
 	case CL_LOGIN:
 		change_client_state(client, CL_ACTIVE);
