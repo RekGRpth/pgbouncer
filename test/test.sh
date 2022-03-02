@@ -131,11 +131,16 @@ rm -rf $PGDATA
 
 if [ ! -d $PGDATA ]; then
 	mkdir $PGDATA
-	initdb --nosync >> $PG_LOG 2>&1
+	initdb -A trust --nosync >> $PG_LOG
 	if $use_unix_sockets; then
 		echo "unix_socket_directories = '/tmp'" >> pgdata/postgresql.conf
 	fi
+	# We need to make the log go to stderr so that the tests can
+	# check what is being logged.  This should be the default, but
+	# some packagings change the default configuration.
 	cat >>pgdata/postgresql.conf <<-EOF
+	logging_collector = off
+	log_destination = stderr
 	log_connections = on
 	EOF
 	if $use_unix_sockets; then
@@ -343,6 +348,10 @@ test_show_version() {
 	echo "v2=$v2"
 
 	test x"$v1" = x"$v2"
+}
+
+test_help() {
+	$BOUNCER_EXE --help || return 1
 }
 
 # test all the show commands
@@ -1350,6 +1359,7 @@ test_cancel_pool_size() {
 
 testlist="
 test_show_version
+test_help
 test_show
 test_server_login_retry
 test_auth_user
