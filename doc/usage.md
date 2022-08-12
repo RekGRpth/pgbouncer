@@ -200,7 +200,8 @@ total_query_time
     connected to PostgreSQL, executing queries.
 
 total_wait_time
-:   Time spent by clients waiting for a server, in microseconds.
+:   Time spent by clients waiting for a server, in microseconds. Updated
+    when a client connection is assigned a backend connection.
 
 avg_xact_count
 :   Average transactions per second in last stat period.
@@ -221,8 +222,9 @@ avg_query_time
 :   Average query duration, in microseconds.
 
 avg_wait_time
-:   Time spent by clients waiting for a server, in microseconds (average
-    per second).
+:   Average time spent by clients waiting for a server that were assigned a
+    backend connection within the current `stats_period`, in microseconds
+    (averaged per second within that period).
 
 #### SHOW STATS_TOTALS
 
@@ -271,10 +273,10 @@ request_time
 :   When last request was issued.
 
 wait
-:   Current waiting time in seconds.
+:   Not used for server connections.
 
 wait_us
-:   Microsecond part of the current waiting time.
+:   Not used for server connections.
 
 close_needed
 :   1 if the connection will be closed as soon as possible,
@@ -298,6 +300,10 @@ remote_pid
 tls
 :   A string with TLS connection information, or empty if not using TLS.
 
+application_name
+:   A string containing the `application_name` set on the linked client connection,
+    or empty if this is not set, or if there is no linked connection.
+    
 #### SHOW CLIENTS
 
 type
@@ -353,6 +359,10 @@ remote_pid
 tls
 :   A string with TLS connection information, or empty if not using TLS.
 
+application_name
+:   A string containing the `application_name` set by the client
+    for this connection, or empty if this was not set.
+
 #### SHOW POOLS
 
 A new pool entry is made for each couple of (database, user).
@@ -364,7 +374,7 @@ user
 :   User name.
 
 cl_active
-:   Client connections that are linked to server connection and can process queries.
+:   Client connections that are either linked to server connections or are idle with no queries waiting to be processed.
 
 cl_waiting
 :   Client connections that have sent queries but have not yet got a server connection.
