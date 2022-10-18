@@ -51,10 +51,6 @@ task:
     - container:
         image: ubuntu:18.04
       env:
-        PGVERSION: 10
-    - container:
-        image: ubuntu:16.04
-      env:
         PGVERSION: 9.6
     - container:
         image: debian:stable
@@ -115,6 +111,7 @@ task:
   name: Linux (Red Hat)
   container:
     matrix:
+      - image: rockylinux:9
       - image: rockylinux:8
       - image: centos:centos7
   setup_script:
@@ -166,7 +163,7 @@ task:
 task:
   name: FreeBSD
   freebsd_instance:
-    image_family: freebsd-13-0
+    image_family: freebsd-13-1
   env:
     HAVE_IPV6_LOCALHOST: yes
   setup_script:
