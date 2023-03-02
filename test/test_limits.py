@@ -1,6 +1,7 @@
 import asyncio
-import pytest
+
 import psycopg
+import pytest
 
 
 @pytest.mark.asyncio
@@ -113,7 +114,10 @@ async def test_max_user_connections(pg, bouncer):
     dbnames = ["p7a", "p7b", "p7c"]
 
     await asyncio.gather(
-        *[bouncer.asleep(0.5, dbname=db, user="maxedout", times=3, connect_timeout=10) for db in dbnames]
+        *[
+            bouncer.asleep(0.5, dbname=db, user="maxedout", times=3, connect_timeout=10)
+            for db in dbnames
+        ]
     )
 
     assert pg.connection_count("p7", users=["maxedout"]) == 3

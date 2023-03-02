@@ -1,14 +1,14 @@
-import time
-import pytest
-import psycopg
 import asyncio
 import re
+import time
+
+import psycopg
+import pytest
 
 from .utils import HAVE_IPV6_LOCALHOST
 
 
 def test_connect_query(bouncer):
-
     # The p8 database definition in test.ini has some GUC settings
     # in connect_query.  Check that they get set.  (The particular
     # settings don't matter; just use some that are easy to set
