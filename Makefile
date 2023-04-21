@@ -167,5 +167,5 @@ tags:
 #		mkdir -p html && $(PANDOC) $$f -o html/`basename $$f`.html; \
 #	done
 
-#doc/pgbouncer.1 doc/pgbouncer.5:
-#	$(MAKE) -C doc
+doc/pgbouncer.1 doc/pgbouncer.5:
+	$(MAKE) -C doc $(@F)
