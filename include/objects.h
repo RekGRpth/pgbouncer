@@ -32,6 +32,7 @@ extern struct Slab *peer_pool_cache;
 extern struct Slab *pool_cache;
 extern struct Slab *user_cache;
 extern struct Slab *iobuf_cache;
+extern struct Slab *var_list_cache;
 
 PgDatabase *find_peer(int peer_id);
 PgDatabase *find_database(const char *name);
@@ -50,6 +51,7 @@ bool check_fast_fail(PgSocket *client)		_MUSTCHECK;
 PgSocket *accept_client(int sock, bool is_unix) _MUSTCHECK;
 void disconnect_server(PgSocket *server, bool notify, const char *reason, ...) _PRINTF(3, 4);
 void disconnect_client(PgSocket *client, bool notify, const char *reason, ...) _PRINTF(3, 4);
+void disconnect_client_sqlstate(PgSocket *client, bool notify, const char *sqlstate, const char *reason);
 
 PgDatabase * add_peer(const char *name, int peer_id) _MUSTCHECK;
 PgDatabase * add_database(const char *name) _MUSTCHECK;
