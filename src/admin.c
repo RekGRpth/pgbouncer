@@ -623,13 +623,13 @@ static bool admin_show_users(PgSocket *admin, const char *arg)
 	return true;
 }
 
-#define SKF_STD "sssssisiTTiiississi"
-#define SKF_DBG "sssssisiTTiiississiiiiiiii"
+#define SKF_STD "ssssssisiTTiiississi"
+#define SKF_DBG "ssssssisiTTiiississiiiiiiii"
 
 static void socket_header(PktBuf *buf, bool debug)
 {
 	pktbuf_write_RowDescription(buf, debug ? SKF_DBG : SKF_STD,
-				    "type", "user", "database", "state",
+				    "type", "user", "database", "replication", "state",
 				    "addr", "port", "local_addr", "local_port",
 				    "connect_time", "request_time",
 				    "wait", "wait_us", "close_needed",
@@ -660,6 +660,7 @@ static void socket_row(PktBuf *buf, PgSocket *sk, const char *state, bool debug)
 	const struct PStr *application_name = v->var_list[VAppName];
 	usec_t now = get_cached_time();
 	usec_t wait_time = sk->query_start ? now - sk->query_start : 0;
+	char *replication;
 
 	if (io) {
 		pkt_avail = iobuf_amount_parse(sk->sbuf.io);
@@ -692,10 +693,18 @@ static void socket_row(PktBuf *buf, PgSocket *sk, const char *state, bool debug)
 	else
 		prepared_statement_count = HASH_COUNT(sk->client_prepared_statements);
 
+	if (sk->replication == REPLICATION_NONE)
+		replication = "none";
+	else if (sk->replication == REPLICATION_LOGICAL)
+		replication = "logical";
+	else
+		replication = "physical";
+
 	pktbuf_write_DataRow(buf, debug ? SKF_DBG : SKF_STD,
 			     is_server_socket(sk) ? "S" : "C",
 			     sk->login_user_credentials ? sk->login_user_credentials->name : "(nouser)",
 			     sk->pool && !sk->pool->db->peer_id ? sk->pool->db->name : "(nodb)",
+			     replication,
 			     state, r_addr, pga_port(&sk->remote_addr),
 			     l_addr, pga_port(&sk->local_addr),
 			     sk->connect_time,
@@ -898,7 +907,7 @@ static bool admin_show_pools(PgSocket *admin, const char *arg)
 		pool = container_of(item, PgPool, head);
 		waiter = first_socket(&pool->waiting_client_list);
 		max_wait = (waiter && waiter->query_start) ? now - waiter->query_start : 0;
-		pool_mode = pool_pool_mode(pool);
+		pool_mode = probably_wrong_pool_pool_mode(pool);
 		pktbuf_write_DataRow(buf, "ssiiiiiiiiiiiiis",
 				     pool->db->name, pool->user_credentials->name,
 				     statlist_count(&pool->active_client_list),
@@ -1114,8 +1123,15 @@ static bool admin_cmd_reload(PgSocket *admin, const char *arg)
 /* Command: SHUTDOWN */
 static bool admin_cmd_shutdown(PgSocket *admin, const char *arg)
 {
-	if (arg && *arg)
-		return syntax_error(admin);
+	enum ShutDownMode mode = SHUTDOWN_IMMEDIATE;
+	if (arg && *arg) {
+		if (strcasecmp(arg, "WAIT_FOR_CLIENTS") == 0)
+			mode = SHUTDOWN_WAIT_FOR_CLIENTS;
+		else if (strcasecmp(arg, "WAIT_FOR_SERVERS") == 0)
+			mode = SHUTDOWN_WAIT_FOR_SERVERS;
+		else
+			return syntax_error(admin);
+	}
 
 	if (!admin->admin_user)
 		return admin_error(admin, "admin access needed");
@@ -1125,11 +1141,25 @@ static bool admin_cmd_shutdown(PgSocket *admin, const char *arg)
 	 * event from fd.  Currently atexit() cleanup should be called
 	 * before closing open sockets.
 	 */
-	log_info("SHUTDOWN command issued");
-	cf_shutdown = SHUTDOWN_IMMEDIATE;
-	event_base_loopbreak(pgb_event_base);
-
-	return true;
+	cf_shutdown = mode;
+	if (mode == SHUTDOWN_IMMEDIATE) {
+		log_info("SHUTDOWN command issued");
+		event_base_loopbreak(pgb_event_base);
+		/*
+		 * By not running admin_ready the connection is kept open
+		 * until the process is actually shut down.
+		 */
+		return true;
+	} else {
+		if (mode == SHUTDOWN_WAIT_FOR_SERVERS) {
+			cf_pause_mode = P_PAUSE;
+			log_info("SHUTDOWN WAIT_FOR_SERVERS command issued");
+		} else {
+			log_info("SHUTDOWN WAIT_FOR_CLIENTS command issued");
+		}
+		cleanup_sockets();
+		return admin_ready(admin, "SHUTDOWN");
+	}
 }
 
 static void full_resume(void)
@@ -1138,12 +1168,6 @@ static void full_resume(void)
 	cf_pause_mode = P_NONE;
 	if (tmp_mode == P_SUSPEND)
 		resume_all();
-
-	/* avoid surprise later if cf_shutdown stays set */
-	if (cf_shutdown) {
-		log_info("canceling shutdown");
-		cf_shutdown = SHUTDOWN_NONE;
-	}
 }
 
 /* Command: RESUME */
@@ -1154,10 +1178,13 @@ static bool admin_cmd_resume(PgSocket *admin, const char *arg)
 
 	if (!arg[0]) {
 		log_info("RESUME command issued");
-		if (cf_pause_mode != P_NONE)
+		if (cf_shutdown) {
+			return admin_error(admin, "pooler is shutting down");
+		} else if (cf_pause_mode != P_NONE) {
 			full_resume();
-		else
+		} else {
 			return admin_error(admin, "pooler is not paused/suspended");
+		}
 	} else {
 		PgDatabase *db = find_database(arg);
 		log_info("RESUME '%s' command issued", arg);
@@ -1442,6 +1469,7 @@ static bool admin_show_help(PgSocket *admin, const char *arg)
 		     "\tKILL <db>\n"
 		     "\tSUSPEND\n"
 		     "\tSHUTDOWN\n"
+		     "\tSHUTDOWN WAIT_FOR_SERVERS|WAIT_FOR_CLIENTS\n"
 		     "\tWAIT_CLOSE [<db>]", "");
 	if (res)
 		res = admin_ready(admin, "SHOW");
@@ -1834,6 +1862,9 @@ void admin_handle_cancel(PgSocket *admin)
 	/* weird, but no reason to fail */
 	if (!admin->wait_for_response)
 		slog_warning(admin, "admin cancel request for non-waiting client?");
+
+	if (cf_shutdown)
+		return;
 
 	if (cf_pause_mode != P_NONE)
 		full_resume();

@@ -90,9 +90,26 @@ enum PauseMode {
 };
 
 enum ShutDownMode {
+	/* just stay running */
 	SHUTDOWN_NONE = 0,
-	/* wait for all servers to become idle before stopping the process */
+	/*
+	 * Wait for all servers to become idle before stopping the process. New
+	 * client connection attempts are denied while waiting for the servers
+	 * to be released. Already connected clients that go to CL_WAITING
+	 * state are disconnected eagerly.
+	 */
 	SHUTDOWN_WAIT_FOR_SERVERS,
+	/*
+	 * Wait for all clients to disconnect before stopping the process.
+	 * While waiting for this we stop listening on the socket so no new
+	 * clients can connect. Still connected clients will continue to be
+	 * handed connections from the pool until they disconnect.
+	 *
+	 * This allows for a rolling restart in combination with so_reuseport.
+	 *
+	 * This is an even more graceful shutdown than SHUTDOWN_WAIT_FOR_SERVERS.
+	 */
+	SHUTDOWN_WAIT_FOR_CLIENTS,
 	/* close all connections immediately and stop the process */
 	SHUTDOWN_IMMEDIATE,
 };
@@ -140,6 +157,7 @@ typedef struct PktBuf PktBuf;
 typedef struct ScramState ScramState;
 typedef struct PgPreparedStatement PgPreparedStatement;
 typedef enum ResponseAction ResponseAction;
+typedef enum ReplicationType ReplicationType;
 
 extern int cf_sbuf_len;
 
@@ -228,7 +246,9 @@ extern int cf_sbuf_len;
 
 /* type codes for weird pkts */
 #define PKT_STARTUP_V2  0x20000
-#define PKT_STARTUP     0x30000
+#define PKT_STARTUP_V3  0x30000
+#define PKT_STARTUP_V3_UNSUPPORTED 0x30001
+#define PKT_STARTUP_V4  0x40000
 #define PKT_CANCEL      80877102
 #define PKT_SSLREQ      80877103
 #define PKT_GSSENCREQ   80877104
@@ -608,6 +628,14 @@ typedef struct OutstandingRequest {
 	uint64_t server_ps_query_id;
 } OutstandingRequest;
 
+enum ReplicationType {
+	REPLICATION_NONE = 0,
+	REPLICATION_LOGICAL,
+	REPLICATION_PHYSICAL,
+};
+
+extern const char *replication_type_parameters[3];
+
 /*
  * A client or server connection.
  *
@@ -651,6 +679,9 @@ struct PgSocket {
 	/* server: received an ErrorResponse, waiting for ReadyForQuery to clear
 	 * the outstanding requests until the next Sync */
 	bool query_failed : 1;
+
+	ReplicationType replication;	/* If this is a replication connection */
+	char *startup_options;	/* only tracked for replication connections */
 
 	usec_t connect_time;	/* when connection was made */
 	usec_t request_time;	/* last activity time */

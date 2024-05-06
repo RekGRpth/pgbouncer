@@ -23,6 +23,7 @@
 #include "bouncer.h"
 #include "pam.h"
 #include "scram.h"
+#include "common/builtins.h"
 
 #include <usual/pgutil.h>
 #include <usual/slab.h>
@@ -335,11 +336,15 @@ static bool finish_set_pool(PgSocket *client, bool takeover)
 		if (client->sbuf.tls) {
 			char infobuf[96] = "";
 			tls_get_connection_info(client->sbuf.tls, infobuf, sizeof infobuf);
-			slog_info(client, "login attempt: db=%s user=%s tls=%s",
-				  client->db->name, client->login_user_credentials->name, infobuf);
+			slog_info(client, "login attempt: db=%s user=%s tls=%s replication=%s",
+				  client->db->name,
+				  client->login_user_credentials->name,
+				  infobuf,
+				  replication_type_parameters[client->replication]);
 		} else {
-			slog_info(client, "login attempt: db=%s user=%s tls=no",
-				  client->db->name, client->login_user_credentials->name);
+			slog_info(client, "login attempt: db=%s user=%s tls=no replication=%s",
+				  client->db->name, client->login_user_credentials->name,
+				  replication_type_parameters[client->replication]);
 		}
 	}
 
@@ -356,8 +361,13 @@ static bool finish_set_pool(PgSocket *client, bool takeover)
 
 	auth = cf_auth_type;
 	if (auth == AUTH_HBA) {
-		rule = hba_eval(parsed_hba, &client->remote_addr, !!client->sbuf.tls,
-				client->db->name, client->login_user_credentials->name);
+		rule = hba_eval(
+			parsed_hba,
+			&client->remote_addr,
+			!!client->sbuf.tls,
+			client->replication,
+			client->db->name,
+			client->login_user_credentials->name);
 
 		if (!rule) {
 			disconnect_client(client, true, "no authentication method is found");
@@ -673,6 +683,25 @@ static bool set_startup_options(PgSocket *client, const char *options)
 	char arg_buf[400];
 	struct MBuf arg;
 	const char *position = options;
+
+	if (client->replication) {
+		/*
+		 * Since replication clients will be bound 1-to-1 to a server
+		 * connection, we can support any configuration flags and
+		 * fields in the options startup parameter. Because we can
+		 * simply send the exact same value for the options parameter
+		 * when opening the replication connection to the server. This
+		 * allows us to also support GUCs that don't have the
+		 * GUC_REPORT flag, specifically extra_float_digits which is a
+		 * configuration that is set by CREATE SUBSCRIPTION in the
+		 * options parameter.
+		 */
+		client->startup_options = strdup(options);
+		if (!client->startup_options)
+			disconnect_client(client, true, "out of memory");
+		return true;
+	}
+
 	mbuf_init_fixed_writer(&arg, arg_buf, sizeof(arg_buf));
 	slog_debug(client, "received options: %s", options);
 
@@ -746,12 +775,56 @@ static void set_appname(PgSocket *client, const char *app_name)
 	}
 }
 
+/*
+ * set_replication sets the replication field on the client according the given
+ * replicationString.
+ */
+static bool set_replication(PgSocket *client, const char *replicationString)
+{
+	bool replicationBool = false;
+	if (strcmp(replicationString, "database") == 0) {
+		client->replication = REPLICATION_LOGICAL;
+		return true;
+	}
+	if (!parse_bool(replicationString, &replicationBool)) {
+		return false;
+	}
+	client->replication = replicationBool ? REPLICATION_PHYSICAL : REPLICATION_NONE;
+	return true;
+}
+
 static bool decide_startup_pool(PgSocket *client, PktHdr *pkt)
 {
 	const char *username = NULL, *dbname = NULL;
 	const char *key, *val;
 	bool ok;
 	bool appname_found = false;
+	struct MBuf unsupported_protocol_extensions;
+	int unsupported_protocol_extensions_count = 0;
+	unsigned original_read_pos = pkt->data.read_pos;
+
+	mbuf_init_dynamic(&unsupported_protocol_extensions);
+
+	/*
+	 * First check if we're dealing with a replication connection. Because for
+	 * those we support some additional things when parsing the startup
+	 * parameters, specifically we support any arguments in the options startup
+	 * packet.
+	 */
+	while (1) {
+		ok = mbuf_get_string(&pkt->data, &key);
+		if (!ok || *key == 0)
+			break;
+		ok = mbuf_get_string(&pkt->data, &val);
+		if (!ok)
+			break;
+		if (strcmp(key, "replication") == 0) {
+			slog_debug(client, "got var: %s=%s", key, val);
+			set_replication(client, val);
+		}
+	}
+
+	pkt->data.read_pos = original_read_pos;
 
 	while (1) {
 		ok = mbuf_get_string(&pkt->data, &key);
@@ -773,6 +846,13 @@ static bool decide_startup_pool(PgSocket *client, PktHdr *pkt)
 		} else if (strcmp(key, "application_name") == 0) {
 			set_appname(client, val);
 			appname_found = true;
+		} else if (strcmp(key, "replication") == 0) {
+			/* do nothing, already checked in the previous loop */
+		} else if (strncmp("_pq_.", key, 5) == 0) {
+			slog_debug(client, "ignoring protocol extension parameter: %s=%s", key, val);
+			unsupported_protocol_extensions_count++;
+			if (!mbuf_write(&unsupported_protocol_extensions, key, strlen(key) + 1))
+				return false;
 		} else if (varcache_set(&client->vars, key, val)) {
 			slog_debug(client, "got var: %s=%s", key, val);
 		} else if (strlist_contains(cf_ignore_startup_params, key)) {
@@ -804,6 +884,21 @@ static bool decide_startup_pool(PgSocket *client, PktHdr *pkt)
 			disconnect_client(client, true, "no more connections allowed (max_client_conn)");
 			return false;
 		}
+	}
+
+	if (pkt->type == PKT_STARTUP_V3_UNSUPPORTED || unsupported_protocol_extensions_count > 0) {
+		PktBuf *buf = pktbuf_dynamic(512);
+		int res;
+
+		pktbuf_write_NegotiateProtocolVersion(
+			buf,
+			unsupported_protocol_extensions_count,
+			unsupported_protocol_extensions.data,
+			unsupported_protocol_extensions.write_pos
+			);
+		res = pktbuf_send_immediate(buf, client);
+		if (!res)
+			disconnect_client(client, false, "unable to send protocol negotiation packet");
 	}
 
 	/* find pool */
@@ -999,7 +1094,8 @@ static bool handle_client_startup(PgSocket *client, PktHdr *pkt)
 	case PKT_STARTUP_V2:
 		disconnect_client(client, true, "old V2 protocol not supported");
 		return false;
-	case PKT_STARTUP:
+	case PKT_STARTUP_V3_UNSUPPORTED:
+	case PKT_STARTUP_V3:
 		/* require SSL except on unix socket */
 		if (client_accept_sslmode >= SSLMODE_REQUIRE && !client->sbuf.tls && !is_unix) {
 			disconnect_client(client, true, "SSL required");
@@ -1134,7 +1230,6 @@ static bool handle_client_work(PgSocket *client, PktHdr *pkt)
 	int track_outstanding = false;
 	PreparedStatementAction ps_action = PS_IGNORE;
 	PgClosePacket close_packet;
-	PgPool *pool = client->pool;
 
 	switch (pkt->type) {
 	/* one-packet queries */
@@ -1169,7 +1264,7 @@ static bool handle_client_work(PgSocket *client, PktHdr *pkt)
 	 */
 	case 'P':		/* Parse */
 		track_outstanding = true;
-		if (is_prepared_statements_enabled(pool)) {
+		if (is_prepared_statements_enabled(client)) {
 			ps_action = inspect_parse_packet(client, pkt);
 			pkt_rewind_v3(pkt);
 		}
@@ -1181,7 +1276,7 @@ static bool handle_client_work(PgSocket *client, PktHdr *pkt)
 
 	case 'C':		/* Close */
 		track_outstanding = true;
-		if (is_prepared_statements_enabled(pool)) {
+		if (is_prepared_statements_enabled(client)) {
 			ps_action = inspect_describe_or_close_packet(client, pkt);
 			pkt_rewind_v3(pkt);
 		}
@@ -1189,7 +1284,7 @@ static bool handle_client_work(PgSocket *client, PktHdr *pkt)
 
 	case 'B':		/* Bind */
 		track_outstanding = true;
-		if (is_prepared_statements_enabled(pool)) {
+		if (is_prepared_statements_enabled(client)) {
 			ps_action = inspect_bind_packet(client, pkt);
 			pkt_rewind_v3(pkt);
 		}
@@ -1197,7 +1292,7 @@ static bool handle_client_work(PgSocket *client, PktHdr *pkt)
 
 	case 'D':		/* Describe */
 		track_outstanding = true;
-		if (is_prepared_statements_enabled(pool)) {
+		if (is_prepared_statements_enabled(client)) {
 			ps_action = inspect_describe_or_close_packet(client, pkt);
 			pkt_rewind_v3(pkt);
 		}
