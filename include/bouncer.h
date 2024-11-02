@@ -139,6 +139,10 @@ enum PacketCallbackFlag {
 	CB_HANDLE_COMPLETE_PACKET,
 };
 
+enum LoadBalanceHosts {
+	LOAD_BALANCE_HOSTS_DISABLE,
+	LOAD_BALANCE_HOSTS_ROUND_ROBIN
+};
 
 #define is_server_socket(sk) ((sk)->state >= SV_FREE)
 
@@ -550,9 +554,11 @@ struct PgDatabase {
 	int min_pool_size;	/* min server connections in one pool */
 	int res_pool_size;	/* additional server connections in case of trouble */
 	int pool_mode;		/* pool mode for this database */
+	int max_db_client_connections;	/* max connections that pgbouncer will accept from client to this database */
 	int max_db_connections;	/* max server connections between all pools */
 	usec_t server_lifetime;	/* max lifetime of server connection */
 	char *connect_query;	/* startup commands to send to server after connect */
+	enum LoadBalanceHosts load_balance_hosts;	/* strategy for host selection in a comma-separated host list */
 
 	struct PktBuf *startup_params;	/* partial StartupMessage (without user) be sent to server */
 	const char *dbname;	/* server-side name, pointer to inside startup_msg */
@@ -574,6 +580,7 @@ struct PgDatabase {
 	usec_t inactive_time;	/* when auto-database became inactive (to kill it after timeout) */
 	unsigned active_stamp;	/* set if autodb has connections */
 	int connection_count;	/* total connections for this database in all pools */
+	int client_connection_count;	/* total client connections for this database */
 
 	struct AATree user_tree;	/* users that have been queried on this database */
 };
@@ -637,7 +644,9 @@ struct PgSocket {
 
 	SocketState state : 8;		/* this also specifies socket location */
 
+	bool contributes_db_client_count : 1;
 	bool user_connection_counted : 1;
+
 	bool ready : 1;			/* server: accepts new query */
 	bool idle_tx : 1;		/* server: idling in tx */
 	bool close_needed : 1;		/* server: this socket must be closed ASAP */
@@ -756,6 +765,7 @@ extern int cf_min_pool_size;
 extern int cf_res_pool_size;
 extern usec_t cf_res_pool_timeout;
 extern int cf_max_db_connections;
+extern int cf_max_db_client_connections;
 extern int cf_max_user_connections;
 extern int cf_max_user_client_connections;
 
@@ -841,6 +851,7 @@ extern char *cf_server_tls_ciphers;
 extern int cf_max_prepared_statements;
 
 extern const struct CfLookup pool_mode_map[];
+extern const struct CfLookup load_balance_hosts_map[];
 
 extern usec_t g_suspend_start;
 
