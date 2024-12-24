@@ -553,6 +553,9 @@ name
 pool_size
 :   The user's override pool_size. or NULL if not set.
 
+reserve_pool_size
+:   The user's override reserve_pool_size. or NULL if not set.
+
 pool_mode
 :   The user's override pool_mode, or NULL if not set.
 
@@ -595,7 +598,7 @@ pool_size
 min_pool_size
 :   Minimum number of server connections.
 
-reserve_pool
+reserve_pool_size
 :   Maximum number of additional connections for this database.
 
 server_lifetime

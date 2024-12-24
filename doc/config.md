@@ -1246,10 +1246,10 @@ Only enforced if at least one of the following is true:
 * there is at least one client connected to the pool
 
 
-### reserve_pool
+### reserve_pool_size
 
-Set additional connections for this database. If not set, `reserve_pool_size` is
-used.
+Set additional connections for this database. If not set, the global `reserve_pool_size`
+is used. For backwards compatibilty reasons `reserve_pool` is an alias for this option.
 
 ### connect_query
 
@@ -1337,6 +1337,11 @@ messages to the client, but neither will it accept any provided password.
 
 Set the maximum size of pools for all connections from this user.  If not set,
 the database or `default_pool_size` is used.
+
+### reserve_pool_size
+
+Set the number of additional connections to allow to a pool for this user. If
+not set, the database configuration or the global `reserve_pool_size` is used.
 
 ### pool_mode
 
