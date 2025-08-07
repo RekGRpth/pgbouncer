@@ -46,9 +46,7 @@
 #endif
 #include <stddef.h>
 #include <stdint.h>
-#ifdef HAVE_INTTYPES_H
 #include <inttypes.h>
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -58,12 +56,7 @@
 #include <unistd.h>
 #endif
 
-#ifdef HAVE_STDBOOL_H
 #include <stdbool.h>
-#else
-/* we really want bool type */
-typedef enum { true = 1, false = 0 } bool;
-#endif
 
 #ifdef WIN32
 #include <usual/base_win32.h>
@@ -72,11 +65,6 @@ typedef enum { true = 1, false = 0 } bool;
 #else
 #define DLLEXPORT
 #define DLLIMPORT
-#endif
-
-/** give offset of a field inside struct */
-#ifndef offsetof
-#define offsetof(type, field) ((unsigned long)&(((type *)0)->field))
 #endif
 
 /** given pointer to field inside struct, return pointer to struct */
@@ -111,13 +99,7 @@ typedef enum { true = 1, false = 0 } bool;
  * char flex_string[FLEX_ARRAY];
  * @endcode
  */
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L)
 #define FLEX_ARRAY
-#elif defined(__GNUC__) && (__GNUC__ >= 3)
-#define FLEX_ARRAY
-#else
-#define FLEX_ARRAY 1
-#endif
 
 /** Make string token from C expression */
 #define STR(x) _STR_(x)
@@ -134,11 +116,6 @@ typedef enum { true = 1, false = 0 } bool;
 /** Make single C token from 4 separate tokens */
 #define CONCAT4(a, b, c, d)    _CONCAT4_(a, b, c, d)
 #define _CONCAT4_(a, b, c, d)  a ## b ## c ## d
-
-/** Pre-processor macro for current function name.  */
-#ifndef HAVE_FUNCNAME__FUNC
-#define __func__ __FUNCTION__
-#endif
 
 /**
  * @name Compiler checks, mainly for internal usage.

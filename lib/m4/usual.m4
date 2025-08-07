@@ -69,14 +69,7 @@ dnl
 AC_DEFUN([AC_USUAL_PROGRAM_CHECK], [
 AC_PROG_CC_STDC
 AC_PROG_CPP
-dnl Check if compiler supports __func__
-AC_CACHE_CHECK([whether compiler supports __func__], pgac_cv_funcname_func,
-  [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <stdio.h>]], [[printf("%s\n", __func__);]])],
-    [pgac_cv_funcname_func=yes], [pgac_cv_funcname_func=no])])
-if test x"$pgac_cv_funcname_func" = xyes ; then
-  AC_DEFINE(HAVE_FUNCNAME__FUNC, 1,
-    [Define to 1 if your compiler understands __func__.])
-fi
+
 dnl Check if linker supports -Wl,--as-needed
 if test "$GCC" = "yes"; then
   old_LDFLAGS="$LDFLAGS"
@@ -173,20 +166,18 @@ dnl
 dnl AC_USUAL_TYPE_CHECK: Basic types for C
 dnl
 AC_DEFUN([AC_USUAL_TYPE_CHECK], [
-AC_C_INLINE
 AC_C_RESTRICT
 AC_C_BIGENDIAN
 AC_SYS_LARGEFILE
 AC_TYPE_PID_T
 AC_TYPE_UID_T
-AC_TYPE_SIZE_T
 ])
 
 dnl
 dnl  AC_USUAL_HEADER_CHECK:  Basic headers
 dnl
 AC_DEFUN([AC_USUAL_HEADER_CHECK], [
-AC_CHECK_HEADERS([inttypes.h stdbool.h unistd.h sys/time.h])
+AC_CHECK_HEADERS([unistd.h sys/time.h])
 AC_CHECK_HEADERS([sys/socket.h poll.h sys/un.h])
 AC_CHECK_HEADERS([arpa/inet.h netinet/in.h netinet/tcp.h])
 AC_CHECK_HEADERS([sys/param.h sys/uio.h pwd.h grp.h])
