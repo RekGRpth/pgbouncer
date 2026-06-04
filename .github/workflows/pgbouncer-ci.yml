@@ -50,7 +50,7 @@ jobs:
       ENABLE_VALGRIND: ${{ matrix.enable_valgrind }}
       DIST: ${{ matrix.dist }}
     steps: &linux_steps
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install dependencies
         run: |
           set -e
@@ -172,7 +172,7 @@ jobs:
     env:
       PGVERSION: ${{ matrix.pgversion }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install dependencies
         run: |
           set -e
@@ -226,7 +226,7 @@ jobs:
     env:
       configure_args: ${{ matrix.configure_args }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install dependencies
         run: |
           set -e
@@ -314,7 +314,7 @@ jobs:
       CPPFLAGS: -I/opt/homebrew/opt/openldap/include -I/opt/homebrew/opt/openssl@3/include
       LDFLAGS: -L/opt/homebrew/opt/openldap/lib -L/opt/homebrew/opt/openssl@3/lib
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install dependencies
         run: |
           set -e
@@ -366,7 +366,7 @@ jobs:
       run:
         shell: 'C:\msys64\usr\bin\bash.exe --login -eo pipefail {0}'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install pandoc
         shell: pwsh
         run: choco install -y --no-progress pandoc
@@ -411,7 +411,7 @@ jobs:
     name: Formatting & linting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
