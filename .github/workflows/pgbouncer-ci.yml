@@ -109,14 +109,14 @@ jobs:
           make -j4 install
       - name: Upload tarball
         if: ${{ env.DIST == 'yes' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pgbouncer-tarball
           path: pgbouncer-*.tar.gz
           if-no-files-found: error
       - name: Upload config.log
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: config-log-${{ matrix.name }}
           path: config.log
@@ -200,7 +200,7 @@ jobs:
         run: su user -c "make -j4 install"
       - name: Upload config.log
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: config-log-${{ matrix.name }}
           path: config.log
@@ -254,7 +254,7 @@ jobs:
         run: su user -c "make -j4 install"
       - name: Upload config.log
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: config-log-${{ matrix.name }}
           path: config.log
@@ -342,7 +342,7 @@ jobs:
         run: make -j4 install
       - name: Upload config.log
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: config-log-macos
           path: config.log
@@ -394,14 +394,14 @@ jobs:
       - name: Build zip
         run: make -j4 zip
       - name: Upload zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pgbouncer-windows-zip
           path: pgbouncer-*.zip
           if-no-files-found: error
       - name: Upload config.log
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: config-log-windows
           path: config.log
