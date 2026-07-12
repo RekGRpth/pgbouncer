@@ -80,7 +80,7 @@ jobs:
       ENABLE_VALGRIND: ${{ matrix.enable_valgrind }}
       DIST: ${{ matrix.dist }}
     steps: &linux_steps
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: |
           set -e
@@ -210,7 +210,7 @@ jobs:
       MESON_ARGS: -Dcassert=true -Dsystemd=enabled -Dcares=disabled
       CONFIGURE_ARGS: --enable-cassert --with-systemd --without-cares
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: |
           set -e
@@ -263,7 +263,7 @@ jobs:
       BUILD_SYSTEM: meson
       MESON_ARGS: -Dcassert=true -Dsystemd=enabled -Dldap=enabled -Dpam=enabled ${{ matrix.meson_args }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: |
           set -e
@@ -362,7 +362,7 @@ jobs:
       LDFLAGS: -L/opt/homebrew/opt/openldap/lib -L/opt/homebrew/opt/openssl@3/lib
       PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/opt/openldap/lib/pkgconfig
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: |
           set -e
@@ -417,7 +417,7 @@ jobs:
       run:
         shell: 'C:\msys64\usr\bin\bash.exe --login -eo pipefail {0}'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install pandoc
         shell: pwsh
         run: choco install -y --no-progress pandoc
@@ -466,7 +466,7 @@ jobs:
     name: Formatting & linting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
